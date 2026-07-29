@@ -18,8 +18,15 @@ def main() -> None:
         "--prompt",
         "-p",
         type=str,
-        required=True,
+        default=None,
         help="Task goal or prompt for the agent loop",
+    )
+    parser.add_argument(
+        "--tasks-file",
+        "-f",
+        type=str,
+        default=None,
+        help="File path containing task prompts (one per line or JSON array)",
     )
     parser.add_argument(
         "--workspace",
@@ -36,6 +43,9 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if not args.prompt and not args.tasks_file:
+        parser.error("Either --prompt (-p) or --tasks-file (-f) must be specified.")
+
     settings = get_settings()
     if args.workspace:
         from pathlib import Path
@@ -50,25 +60,54 @@ def main() -> None:
         title="Agent Loop Configuration"
     ))
 
+    # Read tasks into queue
+    tasks: list[str] = []
+    if args.prompt:
+        tasks.append(args.prompt)
+    if args.tasks_file:
+        from pathlib import Path
+        tf = Path(args.tasks_file).resolve()
+        if not tf.exists():
+            console.print(f"[bold red]Error:[/bold red] Task file not found: {tf}")
+            sys.exit(1)
+        content = tf.read_text(encoding="utf-8")
+        if tf.suffix in (".json", ".jsonl"):
+            import json
+            data = json.loads(content)
+            if isinstance(data, list):
+                tasks.extend([str(item) for item in data])
+        else:
+            lines = [line.strip() for line in content.splitlines() if line.strip() and not line.strip().startswith("#")]
+            tasks.extend(lines)
+
     loop = AgentLoop(settings=settings)
-    console.print(f"[bold]Executing Task:[/bold] {args.prompt}\n")
+    total_tasks = len(tasks)
 
-    result = loop.run(args.prompt, run_id=args.run_id)
+    for idx, task_prompt in enumerate(tasks, start=1):
+        console.print(Panel(
+            f"[bold]Task {idx}/{total_tasks}:[/bold] {task_prompt}",
+            border_style="cyan"
+        ))
 
-    if result.completed:
-        console.print(Panel(
-            result.final_output,
-            title=f"[bold green]Task Completed in {result.turns_taken} Turns[/bold green]",
-            border_style="green"
-        ))
-    else:
-        error_msg = result.error or "Unknown failure"
-        console.print(Panel(
-            f"Error: {error_msg}\nStuck Loop: {result.stuck_loop_detected}",
-            title=f"[bold red]Task Failed after {result.turns_taken} Turns[/bold red]",
-            border_style="red"
-        ))
-        sys.exit(1)
+        run_id = f"{args.run_id}-task-{idx}" if args.run_id else None
+        result = loop.run(task_prompt, run_id=run_id)
+
+        if result.completed:
+            console.print(Panel(
+                result.final_output,
+                title=f"[bold green]Task {idx}/{total_tasks} Completed in {result.turns_taken} Turns[/bold green]",
+                border_style="green"
+            ))
+        else:
+            error_msg = result.error or "Unknown failure"
+            console.print(Panel(
+                f"Error: {error_msg}\nStuck Loop: {result.stuck_loop_detected}",
+                title=f"[bold red]Task {idx}/{total_tasks} Failed after {result.turns_taken} Turns[/bold red]",
+                border_style="red"
+            ))
+            if result.stuck_loop_detected:
+                console.print("[bold yellow]Queue paused due to circuit breaker event.[/bold yellow]")
+                sys.exit(1)
 
 
 if __name__ == "__main__":
