@@ -107,6 +107,16 @@ class SandboxedToolSet:
         Returns:
             Combined stdout and stderr.
         """
+        # Block obvious system-wide destructive patterns in local execution mode
+        forbidden_patterns = [
+            "rm -rf /", "rmdir /s /q c:", "rmdir /s /q c:\\", "del /f /s /q c:", "del /f /s /q c:\\",
+            "format c:", "mkfs", "dd if="
+        ]
+        cmd_lower = command.lower()
+        for pattern in forbidden_patterns:
+            if pattern in cmd_lower:
+                return f"Error: Command execution blocked for safety reasons: dangerous command pattern '{pattern}' detected."
+
         try:
             result = subprocess.run(
                 command,

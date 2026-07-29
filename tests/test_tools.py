@@ -45,3 +45,9 @@ def test_exec_command(tmp_workspace: SandboxedToolSet):
     out = tmp_workspace.exec_command("python -c \"print('test output')\"")
     assert "test output" in out
     assert "[exit_code: 0]" in out
+
+
+def test_exec_command_dangerous_guard(tmp_workspace: SandboxedToolSet):
+    """Test blocking dangerous system commands."""
+    out = tmp_workspace.exec_command("rmdir /s /q C:\\")
+    assert "Command execution blocked for safety reasons" in out
