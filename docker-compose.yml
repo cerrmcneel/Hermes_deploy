@@ -1,0 +1,26 @@
+services:
+  hermes-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hermes_deploy_loop
+    user: "1000:1000"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - HARNESS_BASE_URL=http://host.docker.internal:8000
+      - WORKSPACE_DIR=/workspace
+      - MODEL_ID=gemma4:12b
+      - NUM_CTX=8192
+      - THINKING_MODE=false
+      - STUCK_LOOP_THRESHOLD=3
+    volumes:
+      # Target workspace: Read/Write
+      - .:/workspace:rw
+      # Companion harness repository: Read-Only reference mount
+      - ../agentic_HITL_harness:/harness_readonly:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=512k
+    restart: "no"
