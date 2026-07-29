@@ -1,0 +1,11 @@
+# Hermes Autonomous Task Queue
+# Targeted at agentic_HITL_harness
+
+# Task 1: Audit test coverage in agentic_HITL_harness
+Inspect the tests directory in apps/harness/tests/ and list all test files with a brief summary of what each test module validates.
+
+# Task 2: Verify Pydantic schema contracts exporter
+Inspect contracts/export.py and verify that JSON Schema export generation runs without errors.
+
+# Task 3: Generate a summary report of binding invariants
+Inspect docs/wiki/Invariants.md and create a reference summary file named INVARIANTS_SUMMARY.md in the workspace.
