@@ -22,6 +22,13 @@ def main() -> None:
         help="Task goal or prompt for the agent loop",
     )
     parser.add_argument(
+        "--workspace",
+        "-w",
+        type=str,
+        default=None,
+        help="Target workspace directory path for agent operations",
+    )
+    parser.add_argument(
         "--run-id",
         type=str,
         default=None,
@@ -30,6 +37,9 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
+    if args.workspace:
+        from pathlib import Path
+        settings.workspace_dir = Path(args.workspace).resolve()
 
     console.print(Panel.fit(
         f"[bold green]Hermes Deploy Loop Initialized[/bold green]\n"
