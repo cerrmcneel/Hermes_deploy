@@ -21,7 +21,32 @@ Rules:
 2. Operations outside the workspace directory are strictly forbidden.
 3. Be concise and precise. Test your changes using exec_command when relevant.
 4. When finished, provide a concise summary of accomplishments.
+5. Package Installation: You are fully authorized to use exec_command to install any missing Python packages using `.venv\\Scripts\\pip install <pkg>`, `uv pip install <pkg>`, or `pip install <pkg>` whenever tests or scripts fail with ModuleNotFoundError or require new dependencies.
+6. Delegation: ask_claude and ask_antigravity consult a different AI assistant (Claude, Gemini) and return its text response. Use them only when a task explicitly asks for a second opinion or names a capability you do not have - never as a substitute for doing the task yourself.
 """
+
+
+#: Tool-call syntaxes models emit as prose when the chat template fails to parse them.
+#: Seeing any of these in `content` while `tool_calls` is empty means the model tried to
+#: act and the call was silently dropped.
+_UNPARSED_TOOL_MARKERS = (
+    "<function=",
+    "<tool_call>",
+    "<|tool_call|>",
+    "</function>",
+    "<invoke name=",
+)
+
+
+def _unparsed_tool_call(content: str | None) -> str | None:
+    """Return the marker found, or None. See the call site for why this exists."""
+    if not content:
+        return None
+    lowered = content.lower()
+    for marker in _UNPARSED_TOOL_MARKERS:
+        if marker in lowered:
+            return marker
+    return None
 
 
 class LoopResult(BaseModel):
@@ -85,8 +110,28 @@ class AgentLoop:
                 assistant_dict["tool_calls"] = msg.tool_calls
             messages.append(assistant_dict)
 
-            # If no tool calls, model finished task
+            # If no tool calls, model finished task - UNLESS it tried to call one in prose.
             if not msg.tool_calls:
+                unparsed = _unparsed_tool_call(msg.content)
+                if unparsed:
+                    # Measured on qwen3-coder:30b: it emits `<function=write_file>` as
+                    # plain text 4 times out of 6 instead of a structured tool_call, and
+                    # Ollama's template does not parse it. Without this check the loop
+                    # reads "no tool calls" as SUCCESS and reports a task complete having
+                    # written nothing - fast, confident, and entirely wrong.
+                    logger.error(f"[{run_id}] Model emitted an unparsed tool call: {unparsed}")
+                    return LoopResult(
+                        run_id=run_id,
+                        turns_taken=turns,
+                        completed=False,
+                        final_output="",
+                        error=(
+                            f"Model wrote a tool call as text instead of calling it "
+                            f"({unparsed}). The chat template is not parsing this model's "
+                            f"tool syntax; nothing was executed. Switch models or fix the "
+                            f"template - do not treat this as a completed task."
+                        ),
+                    )
                 logger.info(f"[{run_id}] Task completed by model.")
                 return LoopResult(
                     run_id=run_id,

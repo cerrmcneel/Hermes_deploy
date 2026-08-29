@@ -43,14 +43,19 @@ class OllamaClient:
         self,
         messages: List[Dict[str, Any]],
         tools: Optional[List[Dict[str, Any]]] = None,
-        timeout: float = 120.0,
+        timeout: Optional[float] = None,
     ) -> OllamaResponse:
         """Send chat request to Ollama /api/chat endpoint.
+
+        The timeout defaults to `settings.ollama_timeout_s` rather than a hardcoded
+        constant. It used to be a fixed 120s that `agent_loop` never overrode, which
+        silently capped how large a file a turn could write: generation runs at ~29 tok/s,
+        so anything past ~3500 output tokens timed out mid-write.
 
         Args:
             messages: List of message dictionaries.
             tools: Optional list of tool definitions.
-            timeout: Request timeout in seconds.
+            timeout: Request timeout in seconds. Defaults to settings.ollama_timeout_s.
 
         Returns:
             OllamaResponse parsed object.
@@ -76,7 +81,8 @@ class OllamaClient:
             payload["tools"] = tools
 
         url = f"{self.base_url}/api/chat"
-        with httpx.Client(timeout=timeout) as client:
+        effective_timeout = self.settings.ollama_timeout_s if timeout is None else timeout
+        with httpx.Client(timeout=effective_timeout) as client:
             resp = client.post(url, json=payload)
             resp.raise_for_status()
             data = resp.json()

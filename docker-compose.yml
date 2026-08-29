@@ -9,10 +9,21 @@ services:
       - OLLAMA_BASE_URL=http://host.docker.internal:11434
       - HARNESS_BASE_URL=http://host.docker.internal:8000
       - WORKSPACE_DIR=/workspace
-      - MODEL_ID=gemma4:12b
-      - NUM_CTX=8192
+      # devstral, not gemma4: benchmarked 4/4 on Hermes's real tool schemas where
+      # gemma4:12b scored 1/4 and qwen3-coder:30b emitted tool calls as prose. See
+      # scripts/bench_models.py and the note in config.py.
+      - MODEL_ID=devstral:24b
+      # 32768, not 8192: the loop never trims message history, and 8192 could not hold
+      # two source files plus the task prompt - Ollama dropped the task prompt and the
+      # agent wandered. On devstral this costs GPU layers (51% on GPU vs 69% at 4096),
+      # which is a deliberate trade of speed for a context that actually fits the work.
+      - NUM_CTX=32768
+      # devstral generates ~3.4 tok/s here, so a 4000-token write_file needs ~20 minutes.
+      - OLLAMA_TIMEOUT_S=1800
       - THINKING_MODE=false
+      # The breaker, not MAX_TURNS, is what should stop a spinning agent. Leave at 3.
       - STUCK_LOOP_THRESHOLD=3
+      - MAX_TURNS=50
     volumes:
       # Target workspace: Read/Write
       - .:/workspace:rw

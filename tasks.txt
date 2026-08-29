@@ -1,11 +1,79 @@
-# Hermes Autonomous Task Queue
-# Targeted at agentic_HITL_harness
+# Hermes Autonomous Build Tasks - Batch 3
+# Workspace: C:\Users\PC GAMING\projects\agentic_HITL_harness
+# Suite at time of writing: 74 passing. Never leave it below that.
+#
+# INTERPRETER: a bare `python` is the SYSTEM python and has NO langgraph, so
+# `python -m pytest` fails with an ImportError unrelated to the code. Always use
+# .venv/Scripts/python.exe   Test command:
+#   .venv/Scripts/python.exe -m pytest apps/harness/tests -q     -> 74 passed
+#
+# exec_command has a hard 60s timeout that cannot be raised. Never run installs or
+# model inference through it; stop and report instead of retrying.
+#
+# FORMAT WARNING: --tasks-file splits a .txt on EVERY non-comment line, so each task
+# below must stay on ONE line. Do not reflow them into paragraphs.
+# For the four tasks recommended to run first, use tasks_now.json instead.
+#
+# ---------------------------------------------------------------------------
+# BATCH 2 STATUS - do not redo these
+#   T1 server -> real queue ....... DONE (the method is queue.resolve(), NOT
+#                                   queue.respond()/queue.diverge() as Batch 2 said)
+#   T2 serve + telemetry CLI ...... NOT DONE -> Task 1 below
+#   T3 LocalCpuExecutor ........... DONE (rewritten and wired; the first version
+#                                   could not be imported at all)
+#   T4 VRAM eviction .............. NOT DONE, deliberately deferred - see bottom
+#   T5 feedClient.ts .............. NOT DONE -> Task 4 below
+#   T6 export + suite + docs ...... DONE
+#
+# READ BEFORE EDITING ANYTHING
+#   1. AGENTS.md at the repo root, then docs/wiki/Invariants.md. The 14 invariants are
+#      defects when broken, not trade-offs. Cite them by number in commit messages.
+#   2. Never decorate a HarnessModel subclass with @dataclass. It regenerates __init__
+#      and silently destroys every field default. This shipped once, killed
+#      `harness doctor`, and the suite stayed green because no test constructed the
+#      model. See ADR 34.
+#   3. Never create a second copy of the decision record or the invariants list. Two
+#      files claiming to be normative is worse than one that is behind.
+#   4. A green suite is not proof. Any new contract model needs a construction test;
+#      any new cross-component wiring needs a test asserting both halves share state.
+#   5. Source is ASCII-only. Run the whole suite: .venv/Scripts/python.exe -m pytest apps/harness/tests -q
+#   6. Record non-obvious decisions as new numbered ADRs. The log is at 34.
+# ---------------------------------------------------------------------------
 
-# Task 1: Audit test coverage in agentic_HITL_harness
-Inspect the tests directory in apps/harness/tests/ and list all test files with a brief summary of what each test module validates.
+# Task 1: CLI 'serve' and 'telemetry' subcommands  [UNBLOCKS HERMES ITSELF]
+Add 'serve' and 'telemetry' subcommands to apps/harness/src/harness/cli.py. Nothing currently serves the HTTP app, so harness.hitl.server only runs under TestClient while Hermes posts cards to 127.0.0.1:8000. uvicorn 0.52.0 is ALREADY INSTALLED in .venv - do not run pip, it will exceed the 60s exec timeout. Add 'serve' launching uvicorn on 0.0.0.0:8000, and 'telemetry' printing v_attention_ledger and v_divergence. Serve MUST use the same database as the rest of the CLI via load_config(); opening its own store is the bug ADR 33 records. Add apps/harness/tests/test_cli.py. Keep the full suite at 74+ passing.
 
-# Task 2: Verify Pydantic schema contracts exporter
-Inspect contracts/export.py and verify that JSON Schema export generation runs without errors.
+# Task 2: Smoke-test the diagnostics path
+Add apps/harness/tests/test_cli_doctor.py smoke-testing the diagnostics path. The LaneHealth bug lived in a path only `harness doctor` exercised and no test called it, so a 60-test suite stayed green while the command was dead (ADR 34). Invoke doctor against a temporary harness.toml and assert exit 0, at least one lane reported, and the ledger section rendering. Fast and hermetic: no network, no real GPU requirement, and never write into the operator's ./var/harness.db.
 
-# Task 3: Generate a summary report of binding invariants
-Inspect docs/wiki/Invariants.md and create a reference summary file named INVARIANTS_SUMMARY.md in the workspace.
+# Task 3: Expose routing counterfactuals over HTTP  [O3-KR4]
+Add GET /api/cards/{card_id}/why to apps/harness/src/harness/hitl/server.py. Cards carry decision_id but the candidate set is unreachable from the UI, so the feed cannot render "why you're seeing this" - the one thing no competing tool can show. Return the chosen candidate, the full candidate list with each inadmissible_reason, policy_id, policy_version and the decision reason from the routing_decision table. 404 when the card is unknown or has no decision_id. Regenerate with .venv/Scripts/python.exe -m harness.hitl.export_openapi and add tests to apps/harness/tests/test_hitl_server.py using the existing FeedDeps/create_app fixture.
+
+# Task 4: Feed API client against the generated spec  [O3]
+Create apps/feed/src/api/feedClient.ts against docs/openapi.json (7 generated endpoints - build against it, not prose). Honour every client obligation in docs/wiki/HTTP-Surface.md: call /surfaced on actual render not on fetch, or wait_ms and attention_ms collapse and every KPI dies; send client-measured attention_ms; treat respond as retry-safe since the server dedupes on event_id; upload artifacts first and echo the ArtifactRef back on respond. Import types from apps/feed/src/types/contracts.ts rather than duplicating generated types. Touch only apps/feed.
+
+# Task 5: Unify human-lane accounting  [HIGHEST VALUE - confirm direction with operator first]
+Unify human-lane accounting. Asks route through Router.route() yet never produce a TaskMetric, so v_lane_performance carries a human/operator row whose ok_rate is meaningless and whose diverged count is always 0, while real human performance lives in interaction_metric and v_attention_ledger (ADR 32 open note). Investigate, then implement exactly one of: (a) emit a TaskMetric for human asks on resolution, or (b) scope v_lane_performance to model lanes only and drop the vestigial human row. Recommendation is (b) - a human ask has no tokens, cost or VRAM, so a zero-filled TaskMetric would pollute every lane average. If (b), also determine whether ADR 28's divergence-exclusion logic becomes dead code in that view. Add tests in apps/harness/tests/test_dignity.py and record the outcome as ADR 35.
+
+# Task 6: Prove the CPU lane runs a real model
+Prove the CPU lane actually runs a model. LocalCpuExecutor is wired and its admissibility is tested, but no inference has gone through it and the ~4 tokens/second prediction is a guess. Add a local_cpu lane to harness.toml pointing at a model ALREADY present in Ollama, set gpu.enabled = false, and run an agent end to end - expect minutes, not seconds. Record the measured tokens/second as a config comment the way the GPU numbers already are, and update docs/wiki/Verification-Status.md. Do not run `ollama pull` without asking the operator first.
+
+# Task 7: Notification escalation config  [O3-KR5, data model only]
+Add the notification escalation ladder to config. The ladder - quiet, then push, then external channel, then digest, driven by cost_of_delay_micros_per_hour - is designed in docs/wiki/Feed-Design.md but has no representation in config. Add it to apps/harness/src/harness/config.py with per-class thresholds, load it in config_loader.py, document it in harness.toml, and expose current state on GET /api/feed so a client can render it. Thresholds and data model only: no notification delivery, no UI.
+
+# ---------------------------------------------------------------------------
+# DO NOT BUILD YET
+#   VRAM eviction (Batch 2 Task 4). Deliberately deferred: a 7B Q4 (~4.7GB) and YOLO
+#   (<1GB) co-reside in ~10.5GB usable, so nothing ever needs unloading, and
+#   Verdict.ADMIT_AFTER_EVICT exists in the contract for when that changes. Build it
+#   only once harness.toml declares a model that cannot co-reside with the others -
+#   otherwise it is several hundred lines of untested speculation.
+#
+# NEEDS THE OPERATOR, NOT HERMES
+#   - First contact with DeepSeek or Gemini: needs API keys, and their wire shapes have
+#     never been checked against a live endpoint. Expect bugs.
+#   - A real photograph through the capture path. The live proof used a synthetic image.
+#   - Deleting DECISION_RECORD.md and INVARIANTS_SUMMARY.md, now reduced to stubs.
+#   - The product name. "The Harness" is a placeholder.
+#   - Whether REBT sign-off needs cryptographic signing or hashing suffices.
+# ---------------------------------------------------------------------------
